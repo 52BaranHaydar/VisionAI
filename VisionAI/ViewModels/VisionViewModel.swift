@@ -15,6 +15,10 @@ class VisionViewModel: ObservableObject{
     @Published var isLiveMode = false
     @Published var history: [HistoryItem] = []
     @Published var results: [ClassificationResult] = []
+    @Published var wikiInfo: WikipediaResult?
+    @Published var isLoadingWiki = false
+
+    let wikipediaService = WikipediaService.shared
     
     let classificationService = ClassificationService.shared
     let cameraService = CameraService.shared
@@ -35,11 +39,35 @@ class VisionViewModel: ObservableObject{
     // Fotoğrafları sınıflandır
     func classifyImage(_ image: UIImage) {
         selectedImage = image
+        wikiInfo = nil
+        
         Task {
             await classificationService.classify(image: image)
             await MainActor.run {
                 self.results = classificationService.results
                 print("✅ ViewModel results: \(self.results.count)")
+            }
+            
+            // Wikipedia'dan bilgi çek
+            if let topResult = classificationService.results.first {
+                await MainActor.run { isLoadingWiki = true }
+                let info = await wikipediaService.fetchInfo(for: topResult.cleanLabel)
+                await MainActor.run {
+                    wikiInfo = info
+                    isLoadingWiki = false
+                }
+                
+                // Geçmişe ekle
+                await MainActor.run {
+                    if let top = self.results.first {
+                        history.insert(HistoryItem(
+                            image: image,
+                            label: top.cleanLabel,
+                            confidence: top.confidence
+                        ), at: 0)
+                        if history.count > 20 { history.removeLast() }
+                    }
+                }
             }
         }
     }
